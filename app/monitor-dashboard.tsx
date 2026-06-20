@@ -232,6 +232,8 @@ const assignableReportSections: ReportSection[] = [
 
 const romanNumerals = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"];
 const workspaceStorageKey = "northern-nigeria-situation-monitor:v1";
+const scraperApiBaseUrl =
+  process.env.NEXT_PUBLIC_SCRAPER_API_URL || "http://localhost:4000";
 
 const emptySourceForm: Omit<Source, "id" | "enabled"> = {
   name: "",
@@ -633,10 +635,12 @@ export default function MonitorDashboard() {
 
   async function ingestReliefWebReports() {
     setIsIngesting(true);
-    setIngestionMessage("Fetching ReliefWeb reports for the selected period and filters...");
+    setIngestionMessage(
+      "Fetching source material from the scraper pipeline for the selected period and filters...",
+    );
 
     try {
-      const response = await fetch("/api/ingest/reliefweb", {
+      const response = await fetch(`${scraperApiBaseUrl}/ingest`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -646,16 +650,18 @@ export default function MonitorDashboard() {
           endDate: parameters.endDate,
           subjects: parameters.subjects,
           regions: parameters.regions,
+          enabledSources: sources.filter((source) => source.enabled).map((source) => source.name),
         }),
       });
 
       const payload = (await response.json()) as {
         articles?: IngestedArticle[];
         error?: string;
+        count?: number;
       };
 
       if (!response.ok) {
-        throw new Error(payload.error ?? "ReliefWeb ingestion failed.");
+        throw new Error(payload.error ?? "Ingestion failed.");
       }
 
       const incomingArticles = payload.articles ?? [];
@@ -670,7 +676,7 @@ export default function MonitorDashboard() {
           .map((article, index): Article => ({
             ...article,
             id: nextId + index,
-            confidence: "High",
+            confidence: (article as Partial<Article>).confidence ?? "High",
             status: "Queued",
           }));
 
@@ -678,15 +684,15 @@ export default function MonitorDashboard() {
       });
 
       setIngestionMessage(
-        `ReliefWeb returned ${incomingArticles.length} item${
-          incomingArticles.length === 1 ? "" : "s"
-        }. Duplicate URLs were skipped during queueing.`,
+        `${payload.count ?? incomingArticles.length} item${
+          (payload.count ?? incomingArticles.length) === 1 ? "" : "s"
+        } queued from the ingestion pipeline. Duplicate URLs were skipped.`,
       );
     } catch (error) {
       setIngestionMessage(
         error instanceof Error
           ? error.message
-          : "ReliefWeb ingestion failed. Check network access and try again.",
+          : "Ingestion failed. Check that the scraper server is running.",
       );
     } finally {
       setIsIngesting(false);
