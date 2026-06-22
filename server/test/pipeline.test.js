@@ -36,3 +36,25 @@ test('ingestPipeline handles empty enabled sources gracefully', async () => {
   assert.equal(result.count, 0);
   assert.deepEqual(result.articles, []);
 });
+
+test('ingestPipeline supports dashboard source names for RSS feeds', async () => {
+  const result = await ingestPipeline({
+    ...samplePayload,
+    enabledSources: ['Daily Trust', 'HumAngle']
+  });
+
+  assert.equal(result.ok, true);
+  assert.ok(Array.isArray(result.articles));
+  assert.ok(result.count >= 0);
+});
+
+test('ingestPipeline ignores unknown source names safely', async () => {
+  const result = await ingestPipeline({
+    ...samplePayload,
+    enabledSources: ['UnknownSource']
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.count, 0);
+  assert.deepEqual(result.articles, []);
+});

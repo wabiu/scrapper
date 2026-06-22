@@ -1,4 +1,5 @@
 const Parser = require('rss-parser');
+const { defaultRssFeedConfigs } = require('./rssConfig');
 
 async function searchRss({ subjects = [], regions = [] }) {
   const parser = new Parser({
@@ -7,16 +8,11 @@ async function searchRss({ subjects = [], regions = [] }) {
     }
   });
 
-  const feedUrls = [
-    'https://www.dailytrust.com.ng/feed/',
-    'https://humanglemedia.com/feed/'
-  ];
-
   const allItems = [];
 
-  for (const feedUrl of feedUrls) {
+  for (const feedConfig of defaultRssFeedConfigs) {
     try {
-      const feed = await parser.parseURL(feedUrl);
+      const feed = await parser.parseURL(feedConfig.url);
       const items = (feed.items || []).map((item) => {
         const text = `${item.title || ''} ${item.contentSnippet || ''} ${item.content || ''}`;
         const region = pickRegion(text, regions);
@@ -24,7 +20,7 @@ async function searchRss({ subjects = [], regions = [] }) {
 
         return {
           title: item.title || 'Untitled RSS item',
-          source: feed.title || 'RSS Source',
+          source: feedConfig.name || feed.title || 'RSS Source',
           url: item.link || '',
           date: item.pubDate ? item.pubDate.slice(0, 10) : new Date().toISOString().slice(0, 10),
           region,
@@ -35,7 +31,7 @@ async function searchRss({ subjects = [], regions = [] }) {
 
       allItems.push(...items);
     } catch (error) {
-      console.warn(`RSS feed failed: ${feedUrl}`, error.message);
+      console.warn(`RSS feed failed: ${feedConfig.url}`, error.message);
     }
   }
 
