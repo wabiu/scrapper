@@ -31,6 +31,7 @@ type Source = {
   coverage: string;
   priority: Priority;
   enabled: boolean;
+  backendSupported?: boolean;
 };
 
 type Article = {
@@ -50,13 +51,88 @@ type Article = {
   reviewerNote?: string;
 };
 
+type WorkspaceStatus = "draft" | "published";
+
 type WorkspaceState = {
+  status?: WorkspaceStatus;
+  publishedAt?: string | null;
   parameters: ReportParameters;
   sources: Source[];
   articles: Article[];
 };
 
-type IngestedArticle = Pick<Article, "title" | "source" | "url" | "date" | "region" | "subject">;
+type SourceHealthEntry = {
+  name: string;
+  ok: boolean;
+  count: number;
+  error: string | null;
+  checkedAt: string | null;
+};
+
+type RunHistoryEntry = {
+  runAt: string;
+  count: number;
+  sourceHealth: SourceHealthEntry[];
+  lastErrors: Array<{ source: string; message: string }>;
+};
+
+type HealthStatus = {
+  ok: boolean;
+  service: string;
+  snapshotCount: number;
+  generatedAt: string | null;
+  hasSnapshot: boolean;
+  sourceHealth: SourceHealthEntry[];
+  lastErrors: Array<{ source: string; message: string }>;
+  lastRunAt: string | null;
+  runHistory: RunHistoryEntry[];
+  workspaceCount?: number;
+  latestWorkspaceTitle?: string | null;
+  latestWorkspaceStatus?: WorkspaceStatus | null;
+  latestWorkspaceUpdatedAt?: string | null;
+  mongo?: {
+    configured: boolean;
+    connected: boolean;
+    message: string;
+  };
+  scheduler?: {
+    enabled: boolean;
+    running: boolean;
+    intervalMinutes: number;
+    lastRunAt: string | null;
+    nextRunAt: string | null;
+    lastError: string | null;
+  };
+};
+
+type WorkspaceSummary = {
+  id?: string;
+  title?: string;
+  status?: WorkspaceStatus;
+  publishedAt?: string | null;
+  updatedAt?: string | null;
+  parameters?: ReportParameters;
+  sources?: Source[];
+  articles?: Article[];
+};
+
+type AcledTokenStatus = {
+  ok: boolean;
+  token?: {
+    access_token?: string;
+    refresh_token?: string;
+    expires_in?: number;
+    expires_at?: number;
+    token_type?: string;
+  } | null;
+  error?: string | null;
+};
+
+type IngestedArticle = Pick<Article, "title" | "source" | "url" | "date" | "region" | "subject"> & {
+  summary?: string;
+  extractedFacts?: string[];
+  confidence?: Confidence;
+};
 
 const allSubjects = [
   "Economy",
@@ -105,7 +181,7 @@ const initialParameters: ReportParameters = {
   regions: ["National Overview", "NE Region", "NW Region"],
 };
 
-const initialSources: Source[] = [
+const supportedBackendSources: Source[] = [
   {
     id: 1,
     name: "ReliefWeb",
@@ -113,112 +189,47 @@ const initialSources: Source[] = [
     coverage: "Humanitarian reports, UN and NGO updates",
     priority: "Core",
     enabled: true,
+    backendSupported: true,
   },
   {
     id: 2,
+    name: "RSS",
+    type: "RSS",
+    coverage: "RSS feeds and vetted news sources",
+    priority: "Core",
+    enabled: true,
+    backendSupported: true,
+  },
+  {
+    id: 3,
+    name: "HTML",
+    type: "News",
+    coverage: "HTML-based site discovery and article extraction",
+    priority: "Core",
+    enabled: true,
+    backendSupported: true,
+  },
+  {
+    id: 4,
     name: "ACLED",
     type: "Dataset",
     coverage: "Conflict events, actors, fatalities, locations",
     priority: "Core",
     enabled: true,
-  },
-  {
-    id: 3,
-    name: "OCHA",
-    type: "Official",
-    coverage: "Coordination updates and access constraints",
-    priority: "Core",
-    enabled: true,
-  },
-  {
-    id: 4,
-    name: "UNICEF",
-    type: "Official",
-    coverage: "Health, nutrition, WASH, children, education",
-    priority: "Core",
-    enabled: true,
-  },
-  {
-    id: 5,
-    name: "WHO",
-    type: "Official",
-    coverage: "Disease outbreaks and health response",
-    priority: "Useful",
-    enabled: true,
-  },
-  {
-    id: 6,
-    name: "UNHCR",
-    type: "Official",
-    coverage: "Displacement, shelter, protection",
-    priority: "Useful",
-    enabled: true,
-  },
-  {
-    id: 7,
-    name: "Daily Trust",
-    type: "News",
-    coverage: "Northern Nigeria local reporting",
-    priority: "Core",
-    enabled: true,
-  },
-  {
-    id: 8,
-    name: "HumAngle",
-    type: "News",
-    coverage: "Conflict, humanitarian, and accountability reporting",
-    priority: "Specialist",
-    enabled: true,
+    backendSupported: true,
   },
 ];
 
-const initialArticles: Article[] = [
-  {
-    id: 1,
-    title: "Food security assessment flags worsening conditions in northeast Nigeria",
-    source: "ReliefWeb",
-    url: "https://example.org/reliefweb-food-security",
-    date: "2026-06-17",
-    region: "NE Region",
-    subject: "Food Security",
-    confidence: "High",
-    status: "Needs Review",
-  },
-  {
-    id: 2,
-    title: "Armed attack affects farming communities in Zamfara",
-    source: "Daily Trust",
-    url: "https://example.org/zamfara-farmers",
-    date: "2026-06-13",
-    region: "NW Region",
-    subject: "Security",
-    confidence: "Medium",
-    status: "Needs Review",
-  },
-  {
-    id: 3,
-    title: "Health partners monitor cholera risks in displacement affected areas",
-    source: "UNICEF",
-    url: "https://example.org/borno-health",
-    date: "2026-06-12",
-    region: "Borno",
-    subject: "Health",
-    confidence: "High",
-    status: "Queued",
-  },
-];
+const initialSources: Source[] = supportedBackendSources.map((source) => ({ ...source }));
 
-const reportSections = [
-  "Executive Summary",
-  "Key Developments",
+const initialArticles: Article[] = [];
+
+const reportSections: ReportSection[] = [
   "Context Overview",
-  "Regional Situation Overview",
   "Multisectoral Analysis",
   "Access Constraints",
   "Government and Humanitarian Response",
   "Outlook / Watchpoints",
-  "Source Confidence Notes",
-  "Source List",
 ];
 
 const assignableReportSections: ReportSection[] = [
@@ -231,7 +242,6 @@ const assignableReportSections: ReportSection[] = [
 ];
 
 const romanNumerals = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"];
-const workspaceStorageKey = "northern-nigeria-situation-monitor:v1";
 const scraperApiBaseUrl =
   process.env.NEXT_PUBLIC_SCRAPER_API_URL || "http://localhost:4000";
 
@@ -246,40 +256,10 @@ const emptyArticleForm: Omit<Article, "id" | "confidence" | "status"> = {
   title: "",
   source: "ReliefWeb",
   url: "",
-  date: "2026-06-18",
+  date: new Date().toISOString().slice(0, 10),
   region: "NE Region",
   subject: "Security",
 };
-
-function formatDate(date: string) {
-  return new Intl.DateTimeFormat("en-GB", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  }).format(new Date(`${date}T00:00:00`));
-}
-
-function toggleListValue(values: string[], value: string) {
-  return values.includes(value)
-    ? values.filter((item) => item !== value)
-    : [...values, value];
-}
-
-function getReportSection(subject: string): ReportSection {
-  if (subject === "Government Response" || subject === "Humanitarian Response") {
-    return "Government and Humanitarian Response";
-  }
-
-  if (subject === "Access Constraints") {
-    return "Access Constraints";
-  }
-
-  if (subject === "Security" || subject === "Economy") {
-    return "Regional Situation Overview";
-  }
-
-  return "Multisectoral Analysis";
-}
 
 function getConfidenceForSource(source?: Source): Confidence {
   if (!source) {
@@ -306,6 +286,18 @@ function createExtractedFacts(article: Article) {
   ];
 }
 
+function formatDate(date: string) {
+  try {
+    return new Intl.DateTimeFormat("en-GB", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    }).format(new Date(`${date}T00:00:00`));
+  } catch {
+    return date;
+  }
+}
+
 function createExtractedSummary(article: Article) {
   return `${article.title}. The item is relevant to ${article.region} and has been tagged under ${article.subject.toLowerCase()} for inclusion in the weekly situation update.`;
 }
@@ -316,6 +308,28 @@ function createSafeFilename(value: string) {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "")
     .slice(0, 80);
+}
+
+function toggleListValue(values: string[], value: string) {
+  return values.includes(value) ? values.filter((item) => item !== value) : [...values, value];
+}
+
+function getReportSection(subject: string): ReportSection {
+  const normalizedSubject = subject.toLowerCase();
+
+  if (normalizedSubject.includes("access") || normalizedSubject.includes("constraint")) {
+    return "Access Constraints";
+  }
+
+  if (normalizedSubject.includes("response") || normalizedSubject.includes("government")) {
+    return "Government and Humanitarian Response";
+  }
+
+  if (normalizedSubject.includes("nutrition") || normalizedSubject.includes("health")) {
+    return "Multisectoral Analysis";
+  }
+
+  return "Context Overview";
 }
 
 function escapeHtml(value: string) {
@@ -338,23 +352,85 @@ function downloadFile(filename: string, content: string, type: string) {
   URL.revokeObjectURL(url);
 }
 
-function readStoredWorkspace() {
-  if (typeof window === "undefined") {
-    return null;
+function formatIngestResultMessage(
+  payload: {
+    count?: number;
+    sourceHealth?: SourceHealthEntry[];
+    lastErrors?: Array<{ source: string; message: string }>;
+  },
+  incomingArticles: IngestedArticle[],
+  newArticleCount = incomingArticles.length,
+  duplicateCount = 0,
+) {
+  const count = payload.count ?? incomingArticles.length;
+  const actualNewCount = newArticleCount ?? Math.max(0, count);
+  const duplicatesSkipped = duplicateCount ?? Math.max(0, count - actualNewCount);
+  const errorCount = payload.lastErrors?.length ?? 0;
+
+  if (actualNewCount > 0) {
+    return `${actualNewCount} new, ${duplicatesSkipped} duplicate${duplicatesSkipped === 1 ? "" : "s"}, ${errorCount} error${errorCount === 1 ? "" : "s"}. ${actualNewCount === 1 ? "Article" : "Articles"} added to the workspace.`;
   }
 
-  const savedWorkspace = localStorage.getItem(workspaceStorageKey);
+  if (payload.lastErrors && payload.lastErrors.length > 0) {
+    const failureSummary = payload.lastErrors
+      .slice(0, 3)
+      .map((entry) => `${entry.source}: ${entry.message}`)
+      .join(" • ");
 
-  if (!savedWorkspace) {
-    return null;
+    return `${actualNewCount} new, ${duplicatesSkipped} duplicate${duplicatesSkipped === 1 ? "" : "s"}, ${errorCount} error${errorCount === 1 ? "" : "s"}. ${payload.lastErrors.length === 1 ? "Source issue" : "Source issues"}: ${failureSummary}`;
   }
 
-  try {
-    return JSON.parse(savedWorkspace) as WorkspaceState;
-  } catch {
-    localStorage.removeItem(workspaceStorageKey);
-    return null;
+  if (payload.sourceHealth && payload.sourceHealth.some((entry) => !entry.ok)) {
+    return `${actualNewCount} new, ${duplicatesSkipped} duplicate${duplicatesSkipped === 1 ? "" : "s"}, ${errorCount} error${errorCount === 1 ? "" : "s"}. One or more sources reported errors.`;
   }
+
+  if (count > 0) {
+    return `${actualNewCount} new, ${duplicatesSkipped} duplicate${duplicatesSkipped === 1 ? "" : "s"}, ${errorCount} error${errorCount === 1 ? "" : "s"}. No new items were added to the workspace.`;
+  }
+
+  return "0 new, 0 duplicates, 0 errors. No new articles were returned by the ingestion pipeline.";
+}
+
+function hydrateStoredSource(source: Partial<Source>): Source {
+  const backendSupported =
+    typeof source.backendSupported === "boolean"
+      ? source.backendSupported
+      : supportedBackendSources.some((item) => item.name === source.name);
+
+  return {
+    id: typeof source.id === "number" ? source.id : 0,
+    name: source.name ?? "Unknown Source",
+    type: source.type ?? "News",
+    coverage: source.coverage ?? "",
+    priority: source.priority ?? "Useful",
+    enabled: typeof source.enabled === "boolean" ? source.enabled : true,
+    backendSupported,
+  };
+}
+
+function hydrateWorkspaceSources(rawSources: unknown): Source[] {
+  const persistedSources = Array.isArray(rawSources)
+    ? (rawSources as Array<Partial<Source>>).map((source) => hydrateStoredSource(source))
+    : [];
+
+  const mergedSources = [...persistedSources];
+  supportedBackendSources.forEach((backendSource) => {
+    const existingIndex = mergedSources.findIndex((item) => item.name === backendSource.name);
+    if (existingIndex === -1) {
+      mergedSources.push({
+        ...backendSource,
+        enabled: backendSource.enabled,
+      });
+    } else {
+      mergedSources[existingIndex] = {
+        ...backendSource,
+        ...mergedSources[existingIndex],
+        enabled: mergedSources[existingIndex].enabled,
+      };
+    }
+  });
+
+  return mergedSources;
 }
 
 function ConfidenceBadge({ confidence }: { confidence: Confidence }) {
@@ -388,49 +464,158 @@ function StatusBadge({ status }: { status: IngestionStatus }) {
 }
 
 export default function MonitorDashboard() {
-  const [parameters, setParameters] = useState(initialParameters);
-  const [sources, setSources] = useState(initialSources);
-  const [articles, setArticles] = useState(initialArticles);
+  const [parameters, setParameters] = useState<ReportParameters>(initialParameters);
+  const [sources, setSources] = useState<Source[]>(initialSources);
+  const [articles, setArticles] = useState<Article[]>(initialArticles);
+  const [restoredWorkspaceNotice, setRestoredWorkspaceNotice] = useState<string | null>(null);
   const [sourceForm, setSourceForm] = useState(emptySourceForm);
   const [editingSourceId, setEditingSourceId] = useState<number | null>(null);
   const [articleForm, setArticleForm] = useState(emptyArticleForm);
-  const [isHydrated, setIsHydrated] = useState(false);
   const [ingestionMessage, setIngestionMessage] = useState("Ready to ingest source material.");
+  const [workspaceId, setWorkspaceId] = useState<string | null>(null);
+  const [workspaceStatus, setWorkspaceStatus] = useState<WorkspaceStatus>("draft");
+  const [workspacePublishedAt, setWorkspacePublishedAt] = useState<string | null>(null);
   const [isIngesting, setIsIngesting] = useState(false);
+  const [healthStatus, setHealthStatus] = useState<HealthStatus>({
+    ok: false,
+    service: "scraper-server",
+    snapshotCount: 0,
+    generatedAt: null,
+    hasSnapshot: false,
+    sourceHealth: [],
+    lastErrors: [],
+    lastRunAt: null,
+    runHistory: [],
+  });
+  const [healthMessage, setHealthMessage] = useState("Checking scraper health...");
+  const [serverWorkspaces, setServerWorkspaces] = useState<WorkspaceSummary[]>([]);
+  const [acledTokenStatus, setAcledTokenStatus] = useState<AcledTokenStatus>({ ok: false, token: null });
+  const [activeModal, setActiveModal] = useState<"workspace" | "health" | "draft" | null>(null);
+
+  async function refreshHealthStatus() {
+    try {
+      const response = await fetch(`${scraperApiBaseUrl}/health`);
+      const payload = (await response.json()) as Partial<HealthStatus> & { ok?: boolean };
+
+      setHealthStatus({
+        ok: response.ok && payload.ok === true,
+        service: payload.service ?? "scraper-server",
+        snapshotCount: typeof payload.snapshotCount === "number" ? payload.snapshotCount : 0,
+        generatedAt: payload.generatedAt ?? null,
+        hasSnapshot: payload.hasSnapshot === true,
+        sourceHealth: Array.isArray(payload.sourceHealth) ? payload.sourceHealth : [],
+        lastErrors: Array.isArray(payload.lastErrors) ? payload.lastErrors : [],
+        lastRunAt: payload.lastRunAt ?? null,
+        runHistory: Array.isArray(payload.runHistory) ? payload.runHistory : [],
+        workspaceCount: typeof payload.workspaceCount === "number" ? payload.workspaceCount : undefined,
+        latestWorkspaceTitle: payload.latestWorkspaceTitle ?? null,
+        latestWorkspaceStatus: (payload.latestWorkspaceStatus as WorkspaceStatus | null | undefined) ?? null,
+        latestWorkspaceUpdatedAt: payload.latestWorkspaceUpdatedAt ?? null,
+        mongo: payload.mongo,
+        scheduler: payload.scheduler,
+      });
+      setHealthMessage(
+        response.ok
+          ? `Connected to ${payload.  service ?? "scraper-server"}.`
+          : "The scraper health endpoint returned an error.",
+      );
+    } catch {
+      setHealthStatus((current) => ({ ...current, ok: false }));
+      setHealthMessage("The scraper health endpoint is unavailable.");
+    }
+  }
+
+  async function refreshServerWorkspaces() {
+    try {
+      const response = await fetch(`${scraperApiBaseUrl}/workspaces`);
+      const payload = (await response.json()) as { workspaces?: WorkspaceSummary[]; error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Unable to load workspace list.");
+      }
+      setServerWorkspaces(Array.isArray(payload.workspaces) ? payload.workspaces : []);
+    } catch {
+      setServerWorkspaces([]);
+    }
+  }
+
+  async function refreshAcledAuthStatus() {
+    try {
+      const response = await fetch(`${scraperApiBaseUrl}/acled/token`);
+      const payload = (await response.json()) as AcledTokenStatus & { error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error ?? "No ACLED token is currently available.");
+      }
+      setAcledTokenStatus({ ok: true, token: payload.token ?? null });
+    } catch {
+      setAcledTokenStatus({ ok: false, token: null });
+    }
+  }
 
   useEffect(() => {
-    const savedWorkspace = localStorage.getItem(workspaceStorageKey);
+    const timeoutId = window.setTimeout(() => {
+      void loadWorkspaceFromServer("draft");
+      void refreshHealthStatus();
+      void refreshServerWorkspaces();
+      void refreshAcledAuthStatus();
+    }, 0);
 
-    if (savedWorkspace) {
-      try {
-        const parsedWorkspace = JSON.parse(savedWorkspace) as WorkspaceState;
-        setParameters(parsedWorkspace.parameters ?? initialParameters);
-        setSources(parsedWorkspace.sources ?? initialSources);
-        setArticles(parsedWorkspace.articles ?? initialArticles);
-      } catch {
-        localStorage.removeItem(workspaceStorageKey);
-      }
-    }
-
-    setIsHydrated(true);
+    return () => window.clearTimeout(timeoutId);
   }, []);
 
-  useEffect(() => {
-    if (!isHydrated) {
-      return;
+  const enabledSources = useMemo(
+    () => sources.filter((source) => source.enabled),
+    [sources],
+  );
+  const approvedArticles = articles.filter((article) => article.status === "Approved");
+  const processingQueue = articles.filter((article) => article.status === "Queued");
+  const reviewQueue = articles.filter(
+    (article) => article.status === "Processed" || article.status === "Needs Review",
+  );
+
+  const workflowProgress = useMemo(() => {
+    let progress = 0;
+
+    if (parameters.title.trim()) {
+      progress += 15;
+    }
+    if (parameters.startDate && parameters.endDate) {
+      progress += 15;
+    }
+    if (enabledSources.length > 0) {
+      progress += 15;
+    }
+    if (processingQueue.length + reviewQueue.length + approvedArticles.length > 0) {
+      progress += 20;
+    }
+    if (reviewQueue.length > 0) {
+      progress += 15;
+    }
+    if (approvedArticles.length > 0) {
+      progress += 20;
     }
 
-    const workspace: WorkspaceState = {
-      parameters,
-      sources,
-      articles,
-    };
+    return Math.min(100, progress);
+  }, [approvedArticles, enabledSources.length, parameters.endDate, parameters.startDate, parameters.title, processingQueue.length, reviewQueue.length]);
 
-    localStorage.setItem(workspaceStorageKey, JSON.stringify(workspace));
-  }, [articles, isHydrated, parameters, sources]);
+  const nextRecommendedAction = useMemo(() => {
+    if (processingQueue.length > 0) {
+      return "Process the queued items to prepare evidence for review.";
+    }
 
-  const enabledSources = sources.filter((source) => source.enabled);
-  const approvedArticles = articles.filter((article) => article.status === "Approved");
+    if (reviewQueue.length > 0) {
+      return "Review the prepared items and approve the strongest evidence.";
+    }
+
+    if (approvedArticles.length > 0) {
+      return "Export the report draft or publish the workspace.";
+    }
+
+    if (enabledSources.length > 0) {
+      return "Run the selected sources to gather new article material.";
+    }
+
+    return "Enable at least one source to start building the report.";
+  }, [approvedArticles.length, enabledSources.length, processingQueue.length, reviewQueue.length]);
 
   const filteredArticles = useMemo(
     () =>
@@ -443,15 +628,12 @@ export default function MonitorDashboard() {
     [articles, enabledSources, parameters.regions, parameters.subjects],
   );
 
-  const processingQueue = filteredArticles.filter((article) => article.status === "Queued");
-  const reviewQueue = filteredArticles.filter(
-    (article) => article.status === "Processed" || article.status === "Needs Review",
-  );
-
   const reportDraft = useMemo(() => {
     const grouped = reportSections.map((section) => ({
       section,
-      items: approvedArticles.filter((article) => article.reportSection === section),
+      items: approvedArticles.filter(
+        (article) => getNormalizedReportSection(article.reportSection) === section,
+      ),
     }));
 
     return grouped.filter((group) => group.items.length > 0);
@@ -461,13 +643,19 @@ export default function MonitorDashboard() {
     event.preventDefault();
 
     if (!sourceForm.name.trim() || !sourceForm.coverage.trim()) {
+      setIngestionMessage("Please provide a source name and coverage note before saving.");
       return;
     }
+
+    const name = sourceForm.name.trim();
+    const backendSupported = supportedBackendSources.some((source) => source.name === name);
 
     if (editingSourceId) {
       setSources((currentSources) =>
         currentSources.map((source) =>
-          source.id === editingSourceId ? { ...source, ...sourceForm } : source,
+          source.id === editingSourceId
+            ? { ...source, ...sourceForm, backendSupported: backendSupported || source.backendSupported }
+            : source,
         ),
       );
       setEditingSourceId(null);
@@ -478,6 +666,7 @@ export default function MonitorDashboard() {
           ...sourceForm,
           id: Math.max(0, ...currentSources.map((source) => source.id)) + 1,
           enabled: true,
+          backendSupported,
         },
       ]);
     }
@@ -511,6 +700,7 @@ export default function MonitorDashboard() {
     event.preventDefault();
 
     if (!articleForm.title.trim() || !articleForm.url.trim()) {
+      setIngestionMessage("Add a title and source URL before queueing an article.");
       return;
     }
 
@@ -529,27 +719,6 @@ export default function MonitorDashboard() {
       region: parameters.regions[0] ?? "NE Region",
       subject: parameters.subjects[0] ?? "Security",
     });
-  }
-
-  function simulateIngestionRun() {
-    const sourceName = enabledSources[0]?.name ?? "ReliefWeb";
-    const region = parameters.regions[0] ?? "National Overview";
-    const subject = parameters.subjects[0] ?? "Security";
-
-    setArticles((currentArticles) => [
-      {
-        id: Math.max(0, ...currentArticles.map((article) => article.id)) + 1,
-        title: `${sourceName} monitoring item for ${region}`,
-        source: sourceName,
-        url: "https://example.org/source-monitoring-item",
-        date: parameters.endDate,
-        region,
-        subject,
-        confidence: "Low",
-        status: "Queued",
-      },
-      ...currentArticles,
-    ]);
   }
 
   function processArticle(articleId: number) {
@@ -629,7 +798,10 @@ export default function MonitorDashboard() {
     setParameters(initialParameters);
     setSources(initialSources);
     setArticles(initialArticles);
-    localStorage.removeItem(workspaceStorageKey);
+    setWorkspaceId(null);
+    setWorkspaceStatus("draft");
+    setWorkspacePublishedAt(null);
+    setRestoredWorkspaceNotice(null);
     setIngestionMessage("Workspace reset to the default sample data.");
   }
 
@@ -640,6 +812,20 @@ export default function MonitorDashboard() {
     );
 
     try {
+      const selectedSources = sources
+        .filter((source) => source.enabled && source.backendSupported)
+        .map((source) => source.name);
+      const activeSubjects = parameters.subjects.filter(Boolean);
+      const activeRegions = parameters.regions.filter(Boolean);
+
+      if (selectedSources.length === 0) {
+        throw new Error("Enable at least one backend source before running ingest.");
+      }
+
+      if (activeSubjects.length === 0 || activeRegions.length === 0) {
+        throw new Error("Select at least one subject and one region before running ingest.");
+      }
+
       const response = await fetch(`${scraperApiBaseUrl}/ingest`, {
         method: "POST",
         headers: {
@@ -648,9 +834,9 @@ export default function MonitorDashboard() {
         body: JSON.stringify({
           startDate: parameters.startDate,
           endDate: parameters.endDate,
-          subjects: parameters.subjects,
-          regions: parameters.regions,
-          enabledSources: sources.filter((source) => source.enabled).map((source) => source.name),
+          subjects: activeSubjects,
+          regions: activeRegions,
+          enabledSources: selectedSources,
         }),
       });
 
@@ -658,6 +844,8 @@ export default function MonitorDashboard() {
         articles?: IngestedArticle[];
         error?: string;
         count?: number;
+        sourceHealth?: SourceHealthEntry[];
+        lastErrors?: Array<{ source: string; message: string }>;
       };
 
       if (!response.ok) {
@@ -666,28 +854,57 @@ export default function MonitorDashboard() {
 
       const incomingArticles = payload.articles ?? [];
 
+      let newArticleCount = 0;
+      let duplicateCount = 0;
+
       setArticles((currentArticles) => {
         const existingKeys = new Set(
           currentArticles.map((article) => `${article.url}|${article.title}`),
         );
         const nextId = Math.max(0, ...currentArticles.map((article) => article.id)) + 1;
         const newArticles = incomingArticles
-          .filter((article) => !existingKeys.has(`${article.url}|${article.title}`))
-          .map((article, index): Article => ({
-            ...article,
-            id: nextId + index,
-            confidence: (article as Partial<Article>).confidence ?? "High",
-            status: "Queued",
-          }));
+          .filter((article) => {
+            const key = `${article.url}|${article.title}`;
+            const isDuplicate = existingKeys.has(key);
+            if (isDuplicate) {
+              duplicateCount += 1;
+            } else {
+              newArticleCount += 1;
+            }
+            return !isDuplicate;
+          })
+          .map((article, index): Article => {
+              const baseArticle = {
+              title: article.title,
+              source: article.source,
+              url: article.url,
+              date: article.date,
+              region: article.region,
+              subject: article.subject,
+              confidence: (article.confidence as Confidence | undefined) ?? "High",
+              status: "Processed" as IngestionStatus,
+            };
+
+            return {
+              ...baseArticle,
+              id: nextId + index,
+              confidence: baseArticle.confidence,
+              status: baseArticle.status,
+              extractedSummary: article.summary ?? createExtractedSummary(baseArticle as Article),
+              extractedFacts: article.extractedFacts ?? createExtractedFacts(baseArticle as Article),
+            };
+          });
 
         return [...newArticles, ...currentArticles];
       });
 
-      setIngestionMessage(
-        `${payload.count ?? incomingArticles.length} item${
-          (payload.count ?? incomingArticles.length) === 1 ? "" : "s"
-        } queued from the ingestion pipeline. Duplicate URLs were skipped.`,
-      );
+      setIngestionMessage(formatIngestResultMessage(payload, incomingArticles, newArticleCount, duplicateCount));
+      setHealthStatus((current) => ({
+        ...current,
+        sourceHealth: payload.sourceHealth ?? current.sourceHealth,
+        lastErrors: payload.lastErrors ?? current.lastErrors,
+      }));
+      void refreshHealthStatus();
     } catch (error) {
       setIngestionMessage(
         error instanceof Error
@@ -699,56 +916,344 @@ export default function MonitorDashboard() {
     }
   }
 
-  function buildReportHtml() {
+function getNormalizedReportSection(section?: ReportSection): ReportSection {
+    if (!section || section === "Regional Situation Overview") {
+      return "Context Overview";
+    }
+    return section;
+  }
+
+  function getReportSectionDisplayTitle(section: ReportSection) {
+    switch (section) {
+      case "Context Overview":
+        return "Context";
+      case "Multisectoral Analysis":
+        return "Multisectoral";
+      case "Access Constraints":
+        return "Access constraints";
+      case "Government and Humanitarian Response":
+        return "Humanitarian and government response";
+      case "Outlook / Watchpoints":
+        return "Outlook / watchpoints";
+      default:
+        return section;
+    }
+  }
+
+  function getContextRegionLabel(region: string) {
+    const normalized = region.trim();
+    const regionMap: Record<string, string> = {
+      "NE Region": "North-East",
+      "NW Region": "North-West",
+      "North Central": "North-Central",
+      Borno: "North-East",
+      Adamawa: "North-East",
+      Yobe: "North-East",
+      Zamfara: "North-West",
+      Katsina: "North-West",
+      Sokoto: "North-West",
+      Kaduna: "North-Central",
+      Kebbi: "North-West",
+      "National Overview": "National Overview",
+    };
+
+    return regionMap[normalized] || normalized;
+  }
+
+  function getMultisectorSubsection(subject: string) {
+    const normalized = subject.toLowerCase();
+    if (normalized.includes("food")) {
+      return "Food security";
+    }
+    if (normalized.includes("health") || normalized.includes("nutrition")) {
+      return "Health and nutrition";
+    }
+    if (normalized.includes("protection")) {
+      return "Protection";
+    }
+    if (normalized.includes("shelter") || normalized.includes("nfi")) {
+      return "Shelter / NFI";
+    }
+    if (normalized.includes("wash")) {
+      return "WASH";
+    }
+
+    return "Other multisectoral issues";
+  }
+
+  function renderSourceCitation(article: Article) {
+    return `[<a href="${escapeHtml(article.url)}" target="_blank" rel="noreferrer">${escapeHtml(article.source)}</a>]`;
+  }
+
+  function renderBulletHtml(article: Article) {
+    return `
+      <li>
+        ${escapeHtml(article.extractedSummary ?? createExtractedSummary(article))} ${renderSourceCitation(article)}
+      </li>
+    `;
+  }
+
+  function buildPublishReadyReportHtml() {
+    const approvedRegions = Array.from(new Set(approvedArticles.map((article) => getContextRegionLabel(article.region))));
+    const approvedSubjects = Array.from(new Set(approvedArticles.map((article) => article.subject)));
+    const approvedSources = Array.from(new Set(approvedArticles.map((article) => article.source)));
+
+    const initialSectionCounts: Record<ReportSection, number> = {
+      "Context Overview": 0,
+      "Regional Situation Overview": 0,
+      "Multisectoral Analysis": 0,
+      "Access Constraints": 0,
+      "Government and Humanitarian Response": 0,
+      "Outlook / Watchpoints": 0,
+    };
+
+    const sectionCounts = reportSections.reduce<Record<ReportSection, number>>((counts, section) => {
+      counts[section] = approvedArticles.filter(
+        (article) => getNormalizedReportSection(article.reportSection) === section,
+      ).length;
+      return counts;
+    }, { ...initialSectionCounts });
+
     const summaryText =
       approvedArticles.length === 0
         ? "No approved source items have been cleared for this report."
-        : `During the reporting period, ${approvedArticles.length} approved source item${
-            approvedArticles.length === 1 ? "" : "s"
-          } were cleared for inclusion across ${
-            new Set(approvedArticles.map((article) => article.region)).size
-          } area scope${approvedArticles.length === 1 ? "" : "s"}.`;
+        : `During the reporting period, ${approvedArticles.length} approved items were cleared for inclusion across ${approvedRegions.length} region${
+            approvedRegions.length === 1 ? "" : "s"
+          } and ${approvedSubjects.length} subject area${approvedSubjects.length === 1 ? "" : "s"}.`;
 
-    const groupedSections = reportDraft
-      .map(
-        (group, groupIndex) => `
-          <h2>${romanNumerals[groupIndex + 1]}. ${escapeHtml(group.section)}</h2>
-          <ul>
-            ${group.items
-              .map(
-                (article) => `
-                  <li>
-                    ${escapeHtml(article.extractedSummary ?? createExtractedSummary(article))}
-                    <strong>Source: ${escapeHtml(article.source)}.</strong>
-                  </li>
-                `,
-              )
-              .join("")}
-          </ul>
-        `,
-      )
+    const sourceCounts = approvedArticles.reduce<Record<string, number>>((counts, article) => {
+      counts[article.source] = (counts[article.source] ?? 0) + 1;
+      return counts;
+    }, {});
+
+    const topSource = Object.entries(sourceCounts).sort((a, b) => b[1] - a[1])[0];
+
+    const keyFindings = [
+      `The report is built from ${approvedArticles.length} approved evidence item${approvedArticles.length === 1 ? "" : "s"}.`,
+      `Context and multisectoral coverage are the strongest sections with ${sectionCounts["Context Overview"]} and ${sectionCounts["Multisectoral Analysis"]} approved item${
+        sectionCounts["Multisectoral Analysis"] === 1 ? "" : "s"
+      }.`,
+      topSource
+        ? `Source coverage is led by ${escapeHtml(topSource[0])} with ${topSource[1]} approved item${topSource[1] === 1 ? "" : "s"}.`
+        : "No source is dominant in the current approved evidence set.",
+    ];
+
+    const buildContextSection = () => {
+      const contextItems = approvedArticles.filter(
+        (article) => getNormalizedReportSection(article.reportSection) === "Context Overview",
+      );
+      if (contextItems.length === 0) {
+        return '<p class="section-note">No approved items are currently assigned to the context section.</p>';
+      }
+
+      const groupedByRegion = contextItems.reduce<Record<string, Article[]>>((groups, article) => {
+        const label = getContextRegionLabel(article.region);
+        groups[label] = groups[label] || [];
+        groups[label].push(article);
+        return groups;
+      }, {});
+
+      const regionOrder = ["North-East", "North-Central", "North-West", "National Overview"];
+      const orderedRegions = [...regionOrder, ...Object.keys(groupedByRegion).filter((region) => !regionOrder.includes(region))];
+
+      return orderedRegions
+        .filter((region) => groupedByRegion[region]?.length)
+        .map((region) => {
+          const items = groupedByRegion[region];
+          return `
+            <div class="subsection">
+              <h3>${escapeHtml(region)}</h3>
+              <p class="section-intro">${items.length} approved item${items.length === 1 ? "" : "s"} support this region.</p>
+              <ul>
+                ${items.map(renderBulletHtml).join("")}
+              </ul>
+            </div>
+          `;
+        })
+        .join("");
+    };
+
+    const buildMultisectorSection = () => {
+      const multisectorItems = approvedArticles.filter(
+        (article) => getNormalizedReportSection(article.reportSection) === "Multisectoral Analysis",
+      );
+      if (multisectorItems.length === 0) {
+        return '<p class="section-note">No approved items are currently assigned to multisectoral analysis.</p>';
+      }
+
+      const groupedByTopic = multisectorItems.reduce<Record<string, Article[]>>((groups, article) => {
+        const subsection = getMultisectorSubsection(article.subject);
+        groups[subsection] = groups[subsection] || [];
+        groups[subsection].push(article);
+        return groups;
+      }, {});
+
+      const topicOrder = [
+        "Food security",
+        "Health and nutrition",
+        "Protection",
+        "Shelter / NFI",
+        "WASH",
+        "Other multisectoral issues",
+      ];
+
+      return topicOrder
+        .filter((topic) => groupedByTopic[topic]?.length)
+        .map((topic) => {
+          const items = groupedByTopic[topic];
+          return `
+            <div class="subsection">
+              <h3>${escapeHtml(topic)}</h3>
+              <ul>
+                ${items.map(renderBulletHtml).join("")}
+              </ul>
+            </div>
+          `;
+        })
+        .join("");
+    };
+
+    const buildAccessSection = () => {
+      const accessItems = approvedArticles.filter(
+        (article) => getNormalizedReportSection(article.reportSection) === "Access Constraints",
+      );
+      if (accessItems.length === 0) {
+        return '<p class="section-note">No approved items are currently assigned to access constraints.</p>';
+      }
+
+      const groupedByRegion = accessItems.reduce<Record<string, Article[]>>((groups, article) => {
+        const label = getContextRegionLabel(article.region);
+        groups[label] = groups[label] || [];
+        groups[label].push(article);
+        return groups;
+      }, {});
+
+      const regionOrder = ["North-East", "North-Central", "North-West", "National Overview"];
+      return regionOrder
+        .filter((region) => groupedByRegion[region]?.length)
+        .map((region) => {
+          const items = groupedByRegion[region];
+          return `
+            <div class="subsection">
+              <h3>${escapeHtml(region)}</h3>
+              <ul>
+                ${items.map(renderBulletHtml).join("")}
+              </ul>
+            </div>
+          `;
+        })
+        .join("");
+    };
+
+    const buildResponseSection = () => {
+      const responseItems = approvedArticles.filter(
+        (article) => getNormalizedReportSection(article.reportSection) === "Government and Humanitarian Response",
+      );
+      if (responseItems.length === 0) {
+        return '<p class="section-note">No approved items are currently assigned to the response section.</p>';
+      }
+
+      const governmentItems = responseItems.filter((article) =>
+        article.subject.toLowerCase().includes("government"),
+      );
+      const humanitarianItems = responseItems.filter((article) =>
+        article.subject.toLowerCase().includes("humanitarian"),
+      );
+      const otherItems = responseItems.filter(
+        (article) =>
+          !article.subject.toLowerCase().includes("government") &&
+          !article.subject.toLowerCase().includes("humanitarian"),
+      );
+
+      return `
+        ${governmentItems.length > 0 ? `
+          <div class="subsection">
+            <h3>Government response</h3>
+            <ul>
+              ${governmentItems.map(renderBulletHtml).join("")}
+            </ul>
+          </div>
+        ` : ""}
+        ${humanitarianItems.length > 0 ? `
+          <div class="subsection">
+            <h3>Humanitarian response</h3>
+            <ul>
+              ${humanitarianItems.map(renderBulletHtml).join("")}
+            </ul>
+          </div>
+        ` : ""}
+        ${otherItems.length > 0 ? `
+          <div class="subsection">
+            <h3>Additional response notes</h3>
+            <ul>
+              ${otherItems.map(renderBulletHtml).join("")}
+            </ul>
+          </div>
+        ` : ""}
+      `;
+    };
+
+    const buildOutlookSection = () => {
+      const outlookItems = approvedArticles.filter(
+        (article) => getNormalizedReportSection(article.reportSection) === "Outlook / Watchpoints",
+      );
+
+      if (outlookItems.length === 0) {
+        return '<p class="section-note">No approved items are currently assigned to outlook or watchpoints.</p>';
+      }
+
+      return `
+        <ul>
+          ${outlookItems.map(renderBulletHtml).join("")}
+        </ul>
+      `;
+    };
+
+    const tocItems = reportSections
+      .map((section, sectionIndex) => {
+        const count = sectionCounts[section];
+        const title = getReportSectionDisplayTitle(section).toUpperCase();
+        return `<li><strong>${romanNumerals[sectionIndex + 1]}.</strong> ${escapeHtml(title)} (${count} item${count === 1 ? "" : "s"})</li>`;
+      })
       .join("");
 
-    const confidenceNotes = approvedArticles
-      .map(
-        (article) => `
-          <li>
-            ${escapeHtml(article.source)}: ${escapeHtml(article.confidence)} confidence.
-            ${escapeHtml(article.reviewerNote || "No additional review note recorded.")}
-          </li>
-        `,
-      )
-      .join("");
+    const sectionHtml = reportSections
+      .map((section, sectionIndex) => {
+        const title = `${romanNumerals[sectionIndex + 1]}. ${getReportSectionDisplayTitle(section).toUpperCase()}`;
+        let body = "";
 
-    const sourceList = approvedArticles
-      .map(
-        (article) => `
-          <li>
-            ${escapeHtml(article.source)} - ${escapeHtml(article.title)}
-            (${escapeHtml(article.url)})
-          </li>
-        `,
-      )
+        switch (section) {
+          case "Context Overview":
+            body = buildContextSection();
+            break;
+          case "Multisectoral Analysis":
+            body = buildMultisectorSection();
+            break;
+          case "Access Constraints":
+            body = buildAccessSection();
+            break;
+          case "Government and Humanitarian Response":
+            body = buildResponseSection();
+            break;
+          case "Outlook / Watchpoints":
+            body = buildOutlookSection();
+            break;
+          default:
+            body = "";
+        }
+
+        return `
+          <section>
+            <h2>${escapeHtml(title)}</h2>
+            <div class="section-intro">${
+              sectionCounts[section] > 0
+                ? `${sectionCounts[section]} approved item${sectionCounts[section] === 1 ? "" : "s"} provide evidence for this section.`
+                : "No approved items are available for this section yet."
+            }</div>
+            ${body}
+          </section>
+        `;
+      })
       .join("");
 
     return `<!doctype html>
@@ -757,35 +1262,148 @@ export default function MonitorDashboard() {
           <meta charset="utf-8" />
           <title>${escapeHtml(parameters.title)}</title>
           <style>
-            body { font-family: Arial, Helvetica, sans-serif; color: #18181b; line-height: 1.55; }
-            h1 { font-size: 20px; margin-bottom: 4px; text-transform: uppercase; }
-            h2 { font-size: 15px; margin-top: 22px; margin-bottom: 8px; }
-            p, li { font-size: 12px; }
-            ul { padding-left: 18px; }
-            .meta { color: #52525b; margin: 0; }
-            .header { border-bottom: 1px solid #d4d4d8; padding-bottom: 12px; margin-bottom: 16px; }
+            body { font-family: Inter, Arial, Helvetica, sans-serif; margin: 0; padding: 28px; color: #111827; line-height: 1.65; background: #fff; }
+            h1 { font-size: 28px; margin: 0 0 10px; letter-spacing: 0.04em; text-transform: uppercase; }
+            h2 { font-size: 18px; margin: 30px 0 10px; color: #111827; }
+            h3 { font-size: 15px; margin: 22px 0 8px; color: #1f2937; }
+            p, li { font-size: 13px; margin: 0; }
+            ul { padding-left: 22px; margin: 10px 0 0; }
+            .meta { color: #4b5563; margin: 0; }
+            .header { padding-bottom: 18px; margin-bottom: 28px; border-bottom: 1px solid #e5e7eb; }
+            .section-intro { margin: 10px 0 14px; color: #374151; font-size: 13px; }
+            .subsection { margin-top: 16px; }
+            .subsection h3 { margin-top: 16px; }
+            .section-note { color: #4b5563; margin-top: 10px; font-size: 13px; }
+            .toc { padding-left: 18px; margin: 10px 0 0; color: #4b5563; }
+            .toc li { margin-bottom: 6px; }
+            a { color: #2563eb; text-decoration: none; }
+            a:hover { text-decoration: underline; }
           </style>
         </head>
         <body>
           <div class="header">
             <h1>${escapeHtml(parameters.title)}</h1>
-            <p class="meta">Reporting Period: ${escapeHtml(
-              formatDate(parameters.startDate),
-            )} - ${escapeHtml(formatDate(parameters.endDate))}</p>
+            <p class="meta">Reporting Period: ${escapeHtml(formatDate(parameters.startDate))} – ${escapeHtml(
+              formatDate(parameters.endDate),
+            )}</p>
             <p class="meta">Classification: ${escapeHtml(parameters.classification)}</p>
+            <p class="meta">Approved items: ${approvedArticles.length}; regions: ${approvedRegions.length}; subjects: ${approvedSubjects.length}.</p>
           </div>
 
-          <h2>I. Executive Summary</h2>
-          <p>${escapeHtml(summaryText)}</p>
-          ${groupedSections}
+          <h2>Key findings</h2>
+          <ul>
+            ${keyFindings.map((finding) => `<li>${escapeHtml(finding)}</li>`).join("")}
+          </ul>
 
-          <h2>Source Confidence Notes</h2>
-          <ul>${confidenceNotes || "<li>No approved source confidence notes.</li>"}</ul>
+          <h2>I. Contents</h2>
+          <ul class="toc">
+            ${tocItems}
+          </ul>
 
-          <h2>Source List</h2>
-          <ul>${sourceList || "<li>No approved sources.</li>"}</ul>
+          ${sectionHtml}
         </body>
       </html>`;
+  }
+
+  async function saveWorkspaceToServer(nextStatus: WorkspaceStatus = "draft") {
+    const publishedAt = nextStatus === "published" ? (workspacePublishedAt ?? new Date().toISOString()) : null;
+
+    try {
+      const response = await fetch(`${scraperApiBaseUrl}/workspaces`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          id: workspaceId ?? `workspace-${Date.now()}`,
+          parameters,
+          sources,
+          articles,
+          status: nextStatus,
+          publishedAt,
+          title: parameters.title,
+        }),
+      });
+
+      const payload = (await response.json()) as { workspace?: { id?: string; status?: WorkspaceStatus; publishedAt?: string | null }; error?: string };
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Unable to save workspace draft.");
+      }
+
+      if (payload.workspace?.id) {
+        setWorkspaceId(payload.workspace.id);
+      }
+
+      setWorkspaceStatus(payload.workspace?.status ?? nextStatus);
+      setWorkspacePublishedAt(payload.workspace?.publishedAt ?? publishedAt);
+      await refreshServerWorkspaces();
+      setIngestionMessage(
+        nextStatus === "published"
+          ? "Workspace published and saved to the server."
+          : "Workspace draft saved to the server.",
+      );
+    } catch (error) {
+      setIngestionMessage(error instanceof Error ? error.message : "Unable to save workspace draft.");
+    }
+  }
+
+  async function loadWorkspaceById(workspaceId: string) {
+    try {
+      const response = await fetch(`${scraperApiBaseUrl}/workspaces/${workspaceId}`);
+      const payload = (await response.json()) as { workspace?: WorkspaceSummary & { id?: string; status?: WorkspaceStatus; title?: string; publishedAt?: string | null }; error?: string };
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Unable to load workspace.");
+      }
+
+      const nextWorkspace = payload.workspace;
+      if (!nextWorkspace) {
+        throw new Error("The selected workspace could not be loaded.");
+      }
+
+      setWorkspaceId(nextWorkspace.id ?? null);
+      setWorkspaceStatus((nextWorkspace.status as WorkspaceStatus | undefined) ?? "draft");
+      setWorkspacePublishedAt(nextWorkspace.publishedAt ?? null);
+      setParameters(nextWorkspace.parameters ?? initialParameters);
+      setSources(hydrateWorkspaceSources(nextWorkspace.sources ?? []));
+      setArticles(nextWorkspace.articles ?? initialArticles);
+      setIngestionMessage(`Loaded workspace: ${nextWorkspace.title ?? "Untitled workspace"}`);
+      await refreshServerWorkspaces();
+    } catch (error) {
+      setIngestionMessage(error instanceof Error ? error.message : "Unable to load workspace.");
+    }
+  }
+
+  async function loadWorkspaceFromServer(status: WorkspaceStatus = "draft") {
+    try {
+      const response = await fetch(`${scraperApiBaseUrl}/workspaces?status=${status}`);
+      const payload = (await response.json()) as { workspaces?: Array<WorkspaceState & { id?: string; status?: WorkspaceStatus; title?: string; publishedAt?: string | null }>; error?: string };
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Unable to load workspace draft.");
+      }
+
+      const latestWorkspace = payload.workspaces?.[0];
+      if (!latestWorkspace) {
+        throw new Error(status === "published" ? "No published workspace is available yet." : "No workspace drafts are available yet.");
+      }
+
+      setWorkspaceId(latestWorkspace.id ?? null);
+      setWorkspaceStatus(latestWorkspace.status ?? status);
+      setWorkspacePublishedAt(latestWorkspace.publishedAt ?? null);
+      setParameters(latestWorkspace.parameters ?? initialParameters);
+      setSources(hydrateWorkspaceSources(latestWorkspace.sources ?? []));
+      setArticles(latestWorkspace.articles ?? initialArticles);
+      await refreshServerWorkspaces();
+      setIngestionMessage(
+        status === "published"
+          ? `Loaded published workspace: ${latestWorkspace.title ?? parameters.title}`
+          : `Loaded workspace draft: ${latestWorkspace.title ?? parameters.title}`,
+      );
+    } catch (error) {
+      setIngestionMessage(error instanceof Error ? error.message : "Unable to load workspace draft.");
+    }
   }
 
   function exportWorkspaceJson() {
@@ -805,7 +1423,7 @@ export default function MonitorDashboard() {
   function exportWordDocument() {
     downloadFile(
       `${createSafeFilename(parameters.title)}.doc`,
-      buildReportHtml(),
+      buildPublishReadyReportHtml(),
       "application/msword;charset=utf-8",
     );
   }
@@ -817,7 +1435,7 @@ export default function MonitorDashboard() {
       return;
     }
 
-    reportWindow.document.write(buildReportHtml());
+    reportWindow.document.write(buildPublishReadyReportHtml());
     reportWindow.document.close();
     reportWindow.focus();
     reportWindow.print();
@@ -850,37 +1468,24 @@ export default function MonitorDashboard() {
             </div>
             <div className="border border-zinc-200 bg-zinc-50 p-3">
               <span className="block font-semibold text-zinc-950">Persistence</span>
-              {isHydrated ? "Autosaved" : "Loading"}
+              Autosaved
             </div>
           </div>
         </div>
       </section>
 
+      {restoredWorkspaceNotice ? (
+        <div className="mx-auto max-w-7xl px-5 py-2 sm:px-8">
+          <div className="rounded-md bg-amber-100 px-4 py-2 text-sm font-medium text-amber-900">
+            {restoredWorkspaceNotice}
+          </div>
+        </div>
+      ) : null}
+
       <div className="mx-auto grid max-w-7xl gap-5 px-5 py-5 sm:px-8 xl:grid-cols-[360px_1fr]">
         <aside className="space-y-5">
           <section className="border border-zinc-200 bg-white p-4">
-            <h2 className="text-lg font-semibold">7. Persistence</h2>
-            <p className="mt-1 text-sm text-zinc-600">
-              Workspace changes are saved in this browser automatically.
-            </p>
-            <div className="mt-4 grid gap-2">
-              <button
-                onClick={exportWorkspaceJson}
-                className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-semibold"
-              >
-                Export workspace JSON
-              </button>
-              <button
-                onClick={resetWorkspace}
-                className="rounded-md border border-rose-200 px-3 py-2 text-sm font-semibold text-rose-700"
-              >
-                Reset workspace
-              </button>
-            </div>
-          </section>
-
-          <section className="border border-zinc-200 bg-white p-4">
-            <h2 className="text-lg font-semibold">1. Report Parameters</h2>
+            <h2 className="text-lg font-semibold">1. Define report scope</h2>
             <p className="mt-1 text-sm text-zinc-600">
               Set the reporting frame before collecting or filtering articles.
             </p>
@@ -939,6 +1544,32 @@ export default function MonitorDashboard() {
                   <option>Public Draft</option>
                 </select>
               </label>
+            </div>
+          </section>
+
+          <section className="border border-zinc-200 bg-white p-4">
+            <h3 className="text-sm font-semibold uppercase tracking-[0.14em] text-zinc-500">
+              Quick actions
+            </h3>
+            <div className="mt-3 grid gap-2">
+              <button
+                onClick={() => setActiveModal("workspace")}
+                className="rounded-md border border-zinc-300 bg-zinc-50 px-3 py-2 text-left text-sm font-semibold text-zinc-800"
+              >
+                Workspace & export
+              </button>
+              <button
+                onClick={() => setActiveModal("health")}
+                className="rounded-md border border-zinc-300 bg-zinc-50 px-3 py-2 text-left text-sm font-semibold text-zinc-800"
+              >
+                Pipeline health
+              </button>
+              <button
+                onClick={() => setActiveModal("draft")}
+                className="rounded-md border border-zinc-300 bg-zinc-50 px-3 py-2 text-left text-sm font-semibold text-zinc-800"
+              >
+                Report draft shape
+              </button>
             </div>
           </section>
 
@@ -1003,11 +1634,11 @@ export default function MonitorDashboard() {
         </aside>
 
         <div className="space-y-5">
-          <section className="grid gap-5 xl:grid-cols-[1fr_340px]">
+          <section className="grid gap-5">
             <div className="border border-zinc-200 bg-white p-4">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                  <h2 className="text-lg font-semibold">2. Source Registry</h2>
+                  <h2 className="text-lg font-semibold">2. Manage sources</h2>
                   <p className="mt-1 text-sm text-zinc-600">
                     Add, edit, enable, or remove approved collection sources.
                   </p>
@@ -1078,9 +1709,20 @@ export default function MonitorDashboard() {
                     {sources.map((source) => (
                       <tr key={source.id} className="border-b border-zinc-100">
                         <td className="px-3 py-3 font-semibold">
-                          <span className={source.enabled ? "" : "text-zinc-400"}>
-                            {source.name}
-                          </span>
+                          <div className="flex items-center gap-2">
+                            <span className={source.enabled ? "" : "text-zinc-400"}>
+                              {source.name}
+                            </span>
+                            {source.backendSupported ? (
+                              <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-800">
+                                live
+                              </span>
+                            ) : (
+                              <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-600">
+                                manual
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="px-3 py-3 text-zinc-600">{source.type}</td>
                         <td className="px-3 py-3 text-zinc-600">{source.coverage}</td>
@@ -1118,50 +1760,25 @@ export default function MonitorDashboard() {
               </div>
             </div>
 
-            <div className="border border-zinc-200 bg-white p-4">
-              <h2 className="text-lg font-semibold">Report Draft Shape</h2>
-              <div className="mt-4 border border-zinc-200 bg-zinc-50 p-3 text-sm">
-                <p className="font-semibold">{parameters.title.toUpperCase()}</p>
-                <p className="mt-2 text-zinc-600">
-                  Reporting Period: {formatDate(parameters.startDate)} -{" "}
-                  {formatDate(parameters.endDate)}
-                </p>
-                <p className="text-zinc-600">Classification: {parameters.classification}</p>
-              </div>
-              <ol className="mt-4 space-y-2 text-sm text-zinc-700">
-                {reportSections.map((section, index) => (
-                  <li key={section} className="flex gap-3 border-b border-zinc-100 pb-2">
-                    <span className="w-6 shrink-0 font-semibold text-zinc-400">
-                      {String(index + 1).padStart(2, "0")}
-                    </span>
-                    <span>{section}</span>
-                  </li>
-                ))}
-              </ol>
-            </div>
           </section>
 
           <section className="border border-zinc-200 bg-white p-4">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
               <div>
-                <h2 className="text-lg font-semibold">3. Article Ingestion Workspace</h2>
+                <h2 className="text-lg font-semibold">3. Gather evidence</h2>
                 <p className="mt-1 text-sm text-zinc-600">
                   Queue source material before extraction, deduplication, and analyst review.
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
                 <button
-                  onClick={simulateIngestionRun}
-                  className="w-fit rounded-md border border-zinc-300 px-4 py-2 text-sm font-semibold"
-                >
-                  Run source scan
-                </button>
-                <button
-                  onClick={ingestReliefWebReports}
+                  onClick={() => {
+                    void ingestReliefWebReports();
+                  }}
                   disabled={isIngesting}
                   className="w-fit rounded-md border border-zinc-950 px-4 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:border-zinc-200 disabled:text-zinc-400"
                 >
-                  {isIngesting ? "Ingesting ReliefWeb" : "Ingest ReliefWeb"}
+                  {isIngesting ? "Running ingest" : "Run selected sources"}
                 </button>
                 <button
                   onClick={processQueuedArticles}
@@ -1239,9 +1856,30 @@ export default function MonitorDashboard() {
               </button>
             </form>
 
+            <div className="mt-4 rounded-md border border-zinc-200 bg-zinc-100/70 p-3 text-sm text-zinc-600">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-600">
+                    Workflow cue
+                  </div>
+                  <p className="mt-1 break-words text-sm leading-5 text-zinc-700">
+                    {nextRecommendedAction}
+                  </p>
+                </div>
+                <span className="shrink-0 rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-600">
+                  Next step
+                </span>
+              </div>
+            </div>
+
             <div className="mt-4 grid gap-3">
+              {filteredArticles.length === 0 ? (
+                <div className="rounded-md border border-dashed border-zinc-300 bg-white p-4 text-sm text-zinc-600">
+                  No articles match the current filters yet. Adjust the report scope or enable more sources to see items here.
+                </div>
+              ) : null}
               {filteredArticles.map((article) => (
-                <article key={article.id} className="border border-zinc-200 bg-zinc-50 p-4">
+                <article key={`article-${article.id}`} className="border border-zinc-200 bg-zinc-50 p-4">
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                     <div>
                       <div className="flex flex-wrap gap-2 text-xs font-semibold text-zinc-500">
@@ -1293,51 +1931,41 @@ export default function MonitorDashboard() {
             </div>
           </section>
 
-          <section className="grid gap-5 xl:grid-cols-[360px_1fr]">
-            <div className="border border-zinc-200 bg-white p-4">
-              <h2 className="text-lg font-semibold">4. Article Processing</h2>
-              <p className="mt-1 text-sm text-zinc-600">
-                Convert queued source material into structured report evidence.
-              </p>
-              <div className="mt-4 grid gap-3">
-                <div className="border border-zinc-200 bg-zinc-50 p-3">
-                  <span className="block text-2xl font-semibold">{processingQueue.length}</span>
-                  <span className="text-sm text-zinc-600">Queued for extraction</span>
+          <section className="grid gap-5">
+            <div className="border border-zinc-200 bg-white p-3">
+              <h2 className="text-lg font-semibold">4. Process the queue</h2>
+              <p className="mt-1 text-sm text-zinc-600">Convert queued material into structured evidence.</p>
+              <div className="mt-3 grid grid-cols-3 gap-3">
+                <div className={`rounded-md p-3 text-center ${processingQueue.length > 0 ? 'bg-amber-50 border border-amber-200' : 'bg-zinc-50 border border-zinc-200'}`}>
+                  <div className="text-xs text-zinc-600">Queued</div>
+                  <div className="text-2xl font-semibold text-zinc-950">{processingQueue.length}</div>
                 </div>
-                <div className="border border-zinc-200 bg-zinc-50 p-3">
-                  <span className="block text-2xl font-semibold">{reviewQueue.length}</span>
-                  <span className="text-sm text-zinc-600">Awaiting analyst review</span>
+                <div className={`rounded-md p-3 text-center ${reviewQueue.length > 0 ? 'bg-sky-50 border border-sky-200' : 'bg-zinc-50 border border-zinc-200'}`}>
+                  <div className="text-xs text-zinc-600">Review</div>
+                  <div className="text-2xl font-semibold text-zinc-950">{reviewQueue.length}</div>
+                  {reviewQueue.length > 0 && <div className="mt-1 inline-block text-xs text-sky-700 rounded-full bg-white px-2 py-0.5">Awaiting</div>}
                 </div>
-                <div className="border border-zinc-200 bg-zinc-50 p-3">
-                  <span className="block text-2xl font-semibold">{approvedArticles.length}</span>
-                  <span className="text-sm text-zinc-600">Approved for report</span>
+                <div className={`rounded-md p-3 text-center ${approvedArticles.length > 0 ? 'bg-emerald-50 border border-emerald-200' : 'bg-zinc-50 border border-zinc-200'}`}>
+                  <div className="text-xs text-zinc-600">Approved</div>
+                  <div className="text-2xl font-semibold text-zinc-950">{approvedArticles.length}</div>
                 </div>
               </div>
-              <button
-                onClick={processQueuedArticles}
-                className="mt-4 w-full rounded-md bg-zinc-950 px-4 py-2 text-sm font-semibold text-white"
-              >
-                Process all queued material
-              </button>
+              <button onClick={processQueuedArticles} className="mt-3 w-full rounded-md bg-zinc-950 px-4 py-2 text-sm font-semibold text-white">Process queued items</button>
             </div>
 
-            <div className="border border-zinc-200 bg-white p-4">
-              <h2 className="text-lg font-semibold">5. Analyst Review</h2>
-              <p className="mt-1 text-sm text-zinc-600">
-                Edit extracted language, confirm confidence, and approve only sourced claims.
-              </p>
+            <div className="border border-zinc-200 bg-white p-3">
+              <h2 className="text-lg font-semibold">5. Review and approve</h2>
+              <p className="mt-1 text-sm text-zinc-600">Edit extracted language, confirm confidence, and approve sourced claims.</p>
 
-              <div className="mt-4 grid gap-3">
+              <div className="mt-3 space-y-3">
                 {reviewQueue.length === 0 ? (
-                  <div className="border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-600">
-                    No processed items are waiting for review.
-                  </div>
+                  <div className="border border-zinc-200 bg-zinc-50 p-3 text-sm text-zinc-600">No processed items are waiting for review.</div>
                 ) : null}
 
                 {reviewQueue.map((article) => (
-                  <article key={`review-${article.id}`} className="border border-zinc-200 bg-zinc-50 p-4">
+                  <article key={`review-${article.id}`} className="border border-zinc-200 bg-zinc-50 p-3">
                     <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                      <div>
+                      <div className="flex-1">
                         <div className="flex flex-wrap gap-2 text-xs font-semibold text-zinc-500">
                           <span>{formatDate(article.date)}</span>
                           <span>{article.region}</span>
@@ -1448,12 +2076,20 @@ export default function MonitorDashboard() {
           <section className="border border-zinc-200 bg-white p-4">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
               <div>
-                <h2 className="text-lg font-semibold">6. Report Generator</h2>
+                <h2 className="text-lg font-semibold">6. Generate report</h2>
                 <p className="mt-1 text-sm text-zinc-600">
                   Approved evidence is assembled into the weekly situation update structure.
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() => {
+                    void saveWorkspaceToServer("published");
+                  }}
+                  className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-semibold"
+                >
+                  Publish draft
+                </button>
                 <button
                   onClick={exportWordDocument}
                   className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-semibold"
@@ -1491,50 +2127,325 @@ export default function MonitorDashboard() {
               ) : (
                 <div className="mt-5 space-y-5">
                   <section>
-                    <h4 className="font-semibold">I. Executive Summary</h4>
+                    <h4 className="font-semibold">Key findings</h4>
                     <p className="mt-2 text-sm leading-6 text-zinc-700">
-                      During the reporting period, {approvedArticles.length} approved source
-                      item{approvedArticles.length === 1 ? "" : "s"} were cleared for inclusion
-                      across {new Set(approvedArticles.map((article) => article.region)).size} area
-                      scope{approvedArticles.length === 1 ? "" : "s"}.
+                      {approvedArticles.length} approved item{approvedArticles.length === 1 ? "" : "s"} are currently available for the publish-ready draft. The top sections are based on the evidence assigned to the report structure below.
                     </p>
+                    <div className="mt-3 grid gap-2 border-t border-zinc-200 pt-3 text-xs text-zinc-600 sm:grid-cols-2">
+                      <div>
+                        <span className="font-semibold">Regions:</span>{" "}
+                        {Array.from(new Set(approvedArticles.map((article) => getContextRegionLabel(article.region)))).join(", ")}
+                      </div>
+                      <div>
+                        <span className="font-semibold">Subjects:</span>{" "}
+                        {Array.from(new Set(approvedArticles.map((article) => article.subject))).join(", ")}
+                      </div>
+                    </div>
                   </section>
 
                   {reportDraft.map((group, groupIndex) => (
                     <section key={group.section}>
                       <h4 className="font-semibold">
-                        {romanNumerals[groupIndex + 1]}. {group.section}
+                        {romanNumerals[groupIndex + 1]}. {getReportSectionDisplayTitle(group.section)}
                       </h4>
-                      <ul className="mt-2 space-y-2 text-sm leading-6 text-zinc-700">
-                        {group.items.map((article) => (
-                          <li key={`draft-${article.id}`}>
-                            {article.extractedSummary}{" "}
-                            <span className="font-semibold text-zinc-950">
-                              Source: {article.source}.
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
+                      <p className="mt-2 text-sm leading-6 text-zinc-700">
+                        {group.items[0]?.extractedSummary ?? "No example sentence available."}
+                      </p>
+                      <p className="mt-2 text-xs text-zinc-500">
+                        {group.items.length} approved item{group.items.length === 1 ? "" : "s"} in this section.
+                      </p>
                     </section>
                   ))}
-
-                  <section>
-                    <h4 className="font-semibold">Source Confidence Notes</h4>
-                    <ul className="mt-2 space-y-2 text-sm leading-6 text-zinc-700">
-                      {approvedArticles.map((article) => (
-                        <li key={`confidence-${article.id}`}>
-                          {article.source}: {article.confidence} confidence.{" "}
-                          {article.reviewerNote || "No additional review note recorded."}
-                        </li>
-                      ))}
-                    </ul>
-                  </section>
                 </div>
               )}
             </div>
           </section>
+
+          <section className="border border-zinc-200 bg-white p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold">Report draft shape</h2>
+                <p className="mt-1 text-sm text-zinc-600">
+                  A compact view of the outline and scope that will appear in the final report.
+                </p>
+              </div>
+              <button
+                onClick={() => setActiveModal("draft")}
+                className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-semibold"
+              >
+                Open
+              </button>
+            </div>
+            <div className="mt-4 rounded-md border border-zinc-200 bg-zinc-50 p-3 text-sm">
+              <p className="font-semibold">{parameters.title.toUpperCase()}</p>
+              <p className="mt-2 text-zinc-600">
+                Reporting Period: {formatDate(parameters.startDate)} - {formatDate(parameters.endDate)}
+              </p>
+              <p className="text-zinc-600">Classification: {parameters.classification}</p>
+              <div className="mt-4 rounded-lg bg-white p-3 text-zinc-700">
+                <div className="text-xs uppercase tracking-[0.15em] text-zinc-500">Approved report sections</div>
+                {reportDraft.length === 0 ? (
+                  <p className="mt-3 text-sm text-zinc-600">No approved sections yet. Approve reviewed items to fill the report draft.</p>
+                ) : (
+                  <ol className="mt-3 space-y-2 text-sm text-zinc-700">
+                    {reportDraft.map((group, index) => (
+                      <li key={group.section} className="flex flex-col gap-1 rounded-md border border-zinc-200 bg-zinc-50 p-3">
+                        <div className="flex items-center justify-between gap-3 text-sm font-semibold text-zinc-800">
+                          <span>{romanNumerals[index + 1]}. {group.section}</span>
+                          <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-semibold text-zinc-600">{group.items.length} item{group.items.length === 1 ? "" : "s"}</span>
+                        </div>
+                        <p className="text-xs text-zinc-600">{group.items[0]?.extractedSummary ?? "No summary available."}</p>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </div>
+            </div>
+          </section>
         </div>
       </div>
+
+      {activeModal ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-6">
+          <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-xl border border-zinc-200 bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-zinc-200 px-5 py-4">
+              <div>
+                <h3 className="text-lg font-semibold text-zinc-900">
+                  {activeModal === "workspace"
+                    ? "Workspace & export"
+                    : activeModal === "health"
+                      ? "Pipeline health"
+                      : "Report draft shape"}
+                </h3>
+                <p className="mt-1 text-sm text-zinc-600">
+                  {activeModal === "workspace"
+                    ? "Save, load, export, or reset the current report workspace."
+                    : activeModal === "health"
+                      ? "Inspect the latest ingest health, storage state, and scheduler status."
+                      : "Review the draft report structure before exporting or publishing."}
+                </p>
+              </div>
+              <button
+                onClick={() => setActiveModal(null)}
+                className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-semibold"
+              >
+                Close
+              </button>
+            </div>
+            <div className="p-5">
+              {activeModal === "workspace" ? (
+                <div className="space-y-4">
+                  <div className="rounded-md border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-600">
+                    <div className="inline-flex rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-zinc-700">
+                      Status: {workspaceStatus === "published" ? "Published" : "Draft"}
+                    </div>
+                    {workspacePublishedAt ? (
+                      <p className="mt-2 text-xs text-zinc-500">
+                        Published {new Date(workspacePublishedAt).toLocaleString()}
+                      </p>
+                    ) : null}
+                  </div>
+                  {serverWorkspaces.length > 0 ? (
+                    <div className="rounded-md border border-zinc-200 bg-zinc-50 p-4">
+                      <h4 className="text-sm font-semibold text-zinc-900">Saved workspaces</h4>
+                      <ul className="mt-2 space-y-2 text-sm text-zinc-600">
+                        {serverWorkspaces.slice(0, 5).map((workspace) => (
+                          <li key={workspace.id ?? `${workspace.title ?? "workspace"}-${workspace.updatedAt ?? "unknown"}`} className="rounded-md border border-zinc-200 bg-white p-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (workspace.id) {
+                                  void loadWorkspaceById(workspace.id);
+                                }
+                              }}
+                              className="w-full text-left"
+                            >
+                              <div className="font-medium text-zinc-800">{workspace.title ?? "Untitled workspace"}</div>
+                              <div className="mt-1 flex items-center gap-2 text-xs">
+                                <span className="rounded-full bg-zinc-100 px-2 py-1 uppercase tracking-[0.12em] text-zinc-700">
+                                  {workspace.status ?? "draft"}
+                                </span>
+                                {workspace.updatedAt ? <span>{new Date(workspace.updatedAt).toLocaleString()}</span> : null}
+                              </div>
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <button
+                      onClick={() => {
+                        void saveWorkspaceToServer("draft");
+                        setActiveModal(null);
+                      }}
+                      className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-semibold"
+                    >
+                      Save draft to server
+                    </button>
+                    <button
+                      onClick={() => {
+                        void loadWorkspaceFromServer("draft");
+                        setActiveModal(null);
+                      }}
+                      className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-semibold"
+                    >
+                      Load latest draft
+                    </button>
+                    <button
+                      onClick={() => {
+                        void loadWorkspaceFromServer("published");
+                        setActiveModal(null);
+                      }}
+                      className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-semibold"
+                    >
+                      Load latest published
+                    </button>
+                    <button
+                      onClick={() => {
+                        exportWorkspaceJson();
+                        setActiveModal(null);
+                      }}
+                      className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-semibold"
+                    >
+                      Export workspace JSON
+                    </button>
+                    <button
+                      onClick={() => {
+                        resetWorkspace();
+                        setActiveModal(null);
+                      }}
+                      className="rounded-md border border-rose-200 px-3 py-2 text-sm font-semibold text-rose-700"
+                    >
+                      Reset workspace
+                    </button>
+                  </div>
+                </div>
+              ) : activeModal === "health" ? (
+                <div className="space-y-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span
+                      className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
+                        healthStatus.ok ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800"
+                      }`}
+                    >
+                      {healthStatus.ok ? "Online" : "Offline"}
+                    </span>
+                    <span
+                      className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
+                        healthStatus.mongo?.connected
+                          ? "bg-emerald-100 text-emerald-800"
+                          : "bg-amber-100 text-amber-800"
+                      }`}
+                    >
+                      {healthStatus.mongo?.connected ? "MongoDB connected" : "MongoDB unavailable"}
+                    </span>
+                    <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-700">
+                      {healthStatus.snapshotCount} snapshot items
+                    </span>
+                  </div>
+                  <p className="text-sm text-zinc-600">{healthMessage}</p>
+                  {healthStatus.mongo?.message ? (
+                    <p className="mt-2 text-sm text-zinc-500">{healthStatus.mongo.message}</p>
+                  ) : null}
+                  <div className="rounded-md border border-zinc-200 bg-zinc-50 p-4">
+                    <h4 className="text-sm font-semibold text-zinc-900">Persisted state</h4>
+                    <div className="mt-2 space-y-1 text-sm text-zinc-600">
+                      <div>Snapshots: {healthStatus.snapshotCount}</div>
+                      <div>Saved workspaces: {healthStatus.workspaceCount ?? serverWorkspaces.length}</div>
+                      <div>Latest workspace: {healthStatus.latestWorkspaceTitle ?? "None yet"}</div>
+                      {healthStatus.latestWorkspaceUpdatedAt ? (
+                        <div>Updated: {new Date(healthStatus.latestWorkspaceUpdatedAt).toLocaleString()}</div>
+                      ) : null}
+                    </div>
+                  </div>
+                  <div className="rounded-md border border-zinc-200 bg-zinc-50 p-4">
+                    <h4 className="text-sm font-semibold text-zinc-900">ACLED auth</h4>
+                    <div className="mt-2 text-sm text-zinc-600">
+                      {acledTokenStatus.ok && acledTokenStatus.token?.expires_at ? (
+                        <>
+                          <div className="font-medium text-emerald-700">Token available</div>
+                          <div>Expires: {new Date(acledTokenStatus.token.expires_at * 1000).toLocaleString()}</div>
+                        </>
+                      ) : (
+                        <div className="font-medium text-amber-700">No stored ACLED token yet</div>
+                      )}
+                    </div>
+                  </div>
+                  {healthStatus.sourceHealth.length > 0 ? (
+                    <div className="rounded-md border border-zinc-200 bg-zinc-50 p-4">
+                      <h4 className="text-sm font-semibold text-zinc-900">Source status</h4>
+                      <ul className="mt-2 space-y-2 text-sm text-zinc-600">
+                        {healthStatus.sourceHealth.map((entry) => (
+                          <li key={entry.name} className="flex items-center justify-between gap-2">
+                            <span>{entry.name}</span>
+                            <span className={`rounded-full px-2 py-1 text-xs font-semibold ${entry.ok ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800"}`}>
+                              {entry.ok ? `${entry.count} item${entry.count === 1 ? "" : "s"}` : "error"}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                  {healthStatus.lastErrors.length > 0 ? (
+                    <div className="rounded-md border border-zinc-200 bg-zinc-50 p-4">
+                      <h4 className="text-sm font-semibold text-zinc-900">Recent failures</h4>
+                      <ul className="mt-2 space-y-2 text-sm text-zinc-600">
+                        {healthStatus.lastErrors.map((entry, index) => (
+                          <li key={`${entry.source}-${index}`} className="border-l-2 border-rose-300 pl-2">
+                            <div className="font-medium text-zinc-800">{entry.source}</div>
+                            <div>{entry.message}</div>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                  {healthStatus.scheduler ? (
+                    <div className="rounded-md border border-zinc-200 bg-zinc-50 p-4">
+                      <h4 className="text-sm font-semibold text-zinc-900">Scheduler</h4>
+                      <p className="mt-2 text-sm text-zinc-600">
+                        {healthStatus.scheduler.enabled ? "Enabled" : "Disabled"} • {healthStatus.scheduler.running ? "Running" : "Stopped"}
+                      </p>
+                      <p className="mt-1 text-sm text-zinc-600">
+                        Interval: {healthStatus.scheduler.intervalMinutes} min
+                      </p>
+                      <p className="mt-1 text-sm text-zinc-600">
+                        Next run: {healthStatus.scheduler.nextRunAt ? new Date(healthStatus.scheduler.nextRunAt).toLocaleString() : "Not scheduled"}
+                      </p>
+                    </div>
+                  ) : null}
+                  <button
+                    onClick={() => void refreshHealthStatus()}
+                    className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-semibold"
+                  >
+                    Refresh health
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="rounded-md border border-zinc-200 bg-zinc-50 p-4 text-sm">
+                    <p className="font-semibold">{parameters.title.toUpperCase()}</p>
+                    <p className="mt-2 text-zinc-600">
+                      Reporting Period: {formatDate(parameters.startDate)} - {formatDate(parameters.endDate)}
+                    </p>
+                    <p className="text-zinc-600">Classification: {parameters.classification}</p>
+                  </div>
+                  <ol className="space-y-2 text-sm text-zinc-700">
+                    {reportSections.map((section, index) => (
+                      <li key={section} className="flex gap-3 border-b border-zinc-100 pb-2">
+                        <span className="w-6 shrink-0 font-semibold text-zinc-400">
+                          {String(index + 1).padStart(2, "0")}
+                        </span>
+                        <span>{section}</span>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }
