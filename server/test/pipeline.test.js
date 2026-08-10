@@ -124,8 +124,8 @@ test('ingestPipeline enriches articles with summaries and facts', async () => {
   assert.ok(result.articles[0].extractedFacts.some((fact) => fact.includes('Headline')));
 });
 
-test('getHealthSummary exposes the latest persisted workspace metadata', () => {
-  saveWorkspace({
+test('getHealthSummary exposes the latest persisted workspace metadata', async () => {
+  await saveWorkspace({
     id: 'health-summary-123',
     title: 'Health summary report',
     status: 'draft',
@@ -134,15 +134,15 @@ test('getHealthSummary exposes the latest persisted workspace metadata', () => {
     articles: []
   });
 
-  const summary = getHealthSummary();
+  const summary = await getHealthSummary();
 
   assert.equal(summary.workspaceCount >= 1, true);
   assert.equal(summary.latestWorkspaceTitle, 'Health summary report');
   assert.equal(summary.latestWorkspaceStatus, 'draft');
 });
 
-test('saveWorkspace persists a draft and retrieves it by id', () => {
-  const workspace = saveWorkspace({
+test('saveWorkspace persists a draft and retrieves it by id', async () => {
+  const workspace = await saveWorkspace({
     id: 'draft-123',
     title: 'Draft report',
     status: 'draft',
@@ -151,15 +151,15 @@ test('saveWorkspace persists a draft and retrieves it by id', () => {
     articles: []
   });
 
-  const reloaded = getWorkspaceById('draft-123');
+  const reloaded = await getWorkspaceById('draft-123');
 
   assert.equal(workspace.id, 'draft-123');
   assert.equal(reloaded?.title, 'Draft report');
   assert.equal(reloaded?.status, 'draft');
 });
 
-test('saveWorkspace preserves published workspaces with a publication timestamp', () => {
-  const workspace = saveWorkspace({
+test('saveWorkspace preserves published workspaces with a publication timestamp', async () => {
+  const workspace = await saveWorkspace({
     id: 'published-456',
     title: 'Published report',
     status: 'published',
@@ -168,7 +168,7 @@ test('saveWorkspace preserves published workspaces with a publication timestamp'
     articles: []
   });
 
-  const reloaded = getWorkspaceById('published-456');
+  const reloaded = await getWorkspaceById('published-456');
 
   assert.equal(workspace.status, 'published');
   assert.equal(reloaded?.status, 'published');

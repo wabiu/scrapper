@@ -1,0 +1,22 @@
+/* Centralized report template styles used for exports */
+body {
+  font-family: Inter, Arial, Helvetica, sans-serif;
+  color: #111827;
+  line-height: 1.6;
+  background: #fff;
+  margin: 0;
+  padding: 28px;
+}
+
+h1 { font-size: 28px; letter-spacing: 0.04em; text-transform: uppercase; margin-bottom: 8px; }
+h2 { font-size: 18px; margin-top: 28px; margin-bottom: 6px; }
+h3 { font-size: 15px; margin-top: 16px; margin-bottom: 6px; }
+
+.header { padding-bottom: 18px; margin-bottom: 28px; border-bottom: 1px solid #e5e7eb; }
+.section-intro { color: #374151; margin-bottom: 12px; }
+.subsection { margin-top: 12px; }
+ul { padding-left: 22px; }
+a { color: #2563eb; text-decoration: none; }
+
+/* Small print */
+.meta { color: #4b5563; font-size: 13px; }
