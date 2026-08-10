@@ -49,6 +49,8 @@ type Article = {
   reportSection?: ReportSection;
   processedAt?: string;
   reviewerNote?: string;
+  reviewer?: string | null;
+  changelog?: Array<{ when: string; action: string; by?: string | null }>;
 };
 
 type WorkspaceStatus = "draft" | "published";
@@ -787,7 +789,12 @@ export default function MonitorDashboard() {
               extractedSummary:
                 article.extractedSummary ?? createExtractedSummary(article),
               extractedFacts: article.extractedFacts ?? createExtractedFacts(article),
-              reportSection: article.reportSection ?? getReportSection(article.subject),
+              reportSection: article.reportSection ?? classifyArticleSection(article),
+              reviewer: status === "Approved" ? "auto" : article.reviewer ?? null,
+              changelog: [
+                ...(article.changelog ?? []),
+                { when: new Date().toISOString(), action: `status:${status}`, by: status === "Approved" ? "auto" : null },
+              ],
             }
           : article,
       ),
@@ -985,10 +992,42 @@ function getNormalizedReportSection(section?: ReportSection): ReportSection {
     return `[<a href="${escapeHtml(article.url)}" target="_blank" rel="noreferrer">${escapeHtml(article.source)}</a>]`;
   }
 
+  function generatePublishSentence(article: Article) {
+    const summary = article.extractedSummary ?? createExtractedSummary(article);
+    const date = article.date ? `${formatDate(article.date)} — ` : "";
+    const region = article.region ? `${article.region}: ` : "";
+
+    const sentence = `${date}${region}${summary}`;
+    return escapeHtml(sentence);
+  }
+
+  function classifyArticleSection(article: Article): ReportSection {
+    const text = `${article.title} ${article.extractedSummary ?? ""} ${article.subject}`.toLowerCase();
+
+    if (text.includes("access") || text.includes("inaccessible") || text.includes("curfew") || text.includes("movement")) {
+      return "Access Constraints";
+    }
+
+    if (text.includes("food") || text.includes("harvest") || text.includes("ipc") || text.includes("market")) {
+      return "Multisectoral Analysis";
+    }
+
+    if (text.includes("health") || text.includes("nutrition") || text.includes("vaccine") || text.includes("hospital")) {
+      return "Multisectoral Analysis";
+    }
+
+    if (text.includes("government") || text.includes("evacuat") || text.includes("repatriat") || text.includes("policy") || text.includes("response")) {
+      return "Government and Humanitarian Response";
+    }
+
+    return "Context Overview";
+  }
+
   function renderBulletHtml(article: Article) {
+    const sentence = generatePublishSentence(article);
     return `
       <li>
-        ${escapeHtml(article.extractedSummary ?? createExtractedSummary(article))} ${renderSourceCitation(article)}
+        ${sentence} ${renderSourceCitation(article)}
       </li>
     `;
   }
@@ -1426,6 +1465,85 @@ function getNormalizedReportSection(section?: ReportSection): ReportSection {
       buildPublishReadyReportHtml(),
       "application/msword;charset=utf-8",
     );
+  }
+
+  async function exportDocx() {
+    try {
+      const html = buildPublishReadyReportHtml();
+      // dynamic import to keep bundle size smaller when not used
+      // @ts-ignore - html-docx-js has no bundled TypeScript types
+      const mod = await import('html-docx-js/dist/html-docx');
+      const blob = typeof mod.asBlob === 'function' ? mod.asBlob(html) : new Blob([html], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+      downloadFile(`${createSafeFilename(parameters.title)}.docx`, blob, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    } catch (error) {
+      console.error('Failed to export docx', error);
+      // fallback to .doc
+      exportWordDocument();
+    }
+  }
+
+  async function callEmbeddingsClassify(article: Article) {
+    try {
+      const res = await fetch(`${scraperApiBaseUrl}/embeddings-classify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(article),
+      });
+      const payload = await res.json();
+      if (payload && payload.ok && payload.section) {
+        return payload.section as ReportSection;
+      }
+    } catch (err) {
+      console.warn('embeddings classify failed, falling back to keyword', err);
+    }
+
+    return classifyArticleSection(article);
+  }
+
+  async function callLLMSummarize(article: Article) {
+    try {
+      const res = await fetch(`${scraperApiBaseUrl}/llm-summarize`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(article),
+      });
+      const payload = await res.json();
+      if (payload && payload.ok && payload.summary) {
+        return payload.summary as string;
+      }
+    } catch (err) {
+      console.warn('LLM summarize failed, using local template', err);
+    }
+
+    return createExtractedSummary(article);
+  }
+
+  async function runAutoClassify() {
+    const updated: Article[] = [];
+    for (const a of articles) {
+      if (a.status === 'Approved') {
+        // eslint-disable-next-line no-await-in-loop
+        const section = await callEmbeddingsClassify(a);
+        updated.push({ ...a, reportSection: section, changelog: [...(a.changelog ?? []), { when: new Date().toISOString(), action: 'auto-classified' }] });
+      } else {
+        updated.push(a);
+      }
+    }
+    setArticles(updated);
+  }
+
+  async function runRegenerateSummaries() {
+    const updated: Article[] = [];
+    for (const a of articles) {
+      if (a.status === 'Approved') {
+        // eslint-disable-next-line no-await-in-loop
+        const summary = await callLLMSummarize(a);
+        updated.push({ ...a, extractedSummary: summary, changelog: [...(a.changelog ?? []), { when: new Date().toISOString(), action: 'llm-summarized' }] });
+      } else {
+        updated.push(a);
+      }
+    }
+    setArticles(updated);
   }
 
   function printReportPdf() {
@@ -2097,6 +2215,12 @@ function getNormalizedReportSection(section?: ReportSection): ReportSection {
                   Download Word
                 </button>
                 <button
+                  onClick={exportDocx}
+                  className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-semibold"
+                >
+                  Download .docx
+                </button>
+                <button
                   onClick={printReportPdf}
                   className="rounded-md bg-zinc-950 px-3 py-2 text-sm font-semibold text-white"
                 >
@@ -2105,6 +2229,22 @@ function getNormalizedReportSection(section?: ReportSection): ReportSection {
                 <span className="w-fit rounded-md bg-zinc-100 px-2 py-2 text-xs font-semibold text-zinc-700">
                   {approvedArticles.length} approved source items
                 </span>
+                <button
+                  onClick={() => {
+                    void runAutoClassify();
+                  }}
+                  className="rounded-md border border-zinc-200 px-3 py-2 text-sm font-semibold"
+                >
+                  Run auto-classify
+                </button>
+                <button
+                  onClick={() => {
+                    void runRegenerateSummaries();
+                  }}
+                  className="rounded-md border border-zinc-200 px-3 py-2 text-sm font-semibold"
+                >
+                  Regenerate summaries (LLM)
+                </button>
               </div>
             </div>
 

@@ -13,7 +13,7 @@ const { readSnapshot } = require('../src/ingest/store');
   console.log('ingestPipeline returned', result.count, 'articles');
 
   // Test that snapshot is readable (may be null if pipeline returned zero)
-  const snapshot = readSnapshot();
+  const snapshot = await readSnapshot();
   console.log('Snapshot read:', snapshot ? `${snapshot.count} articles` : 'no snapshot found');
 
   console.log('All smoke checks passed');

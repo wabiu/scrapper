@@ -44,6 +44,7 @@ const { ingestPipeline } = require('./src/ingest/pipeline');
 const { requestAccessToken, refreshAccessToken, getCurrentTokenState } = require('./src/ingest/sources/acled-auth');
 const { persistTokenResponse } = require('./src/ingest/sources/acled-oauth');
 const { readWorkspaces, saveWorkspace, getWorkspaceById } = require('./src/ingest/store');
+const { classifyWithEmbeddings, summarizeArticleWithLLM } = require('./src/openai-client');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -127,6 +128,40 @@ app.post('/ingest', async (req, res) => {
   }
 });
 
+// LLM-powered embeddings-classify endpoint.
+app.post('/embeddings-classify', async (req, res) => {
+  try {
+    const article = req.body;
+    if (!article) {
+      return res.status(400).json({ ok: false, error: 'Article required' });
+    }
+
+    const section = await classifyWithEmbeddings(article);
+    return res.json({ ok: true, section });
+  } catch (error) {
+    console.error('Embeddings classify failed', error);
+    return res.status(500).json({ ok: false, error: error instanceof Error ? error.message : 'Unable to classify' });
+  }
+});
+
+app.post('/llm-summarize', async (req, res) => {
+  try {
+    const article = req.body;
+    if (!article) {
+      return res.status(400).json({ ok: false, error: 'Article required' });
+    }
+
+    const summary = await summarizeArticleWithLLM(article);
+    res.json({ ok: true, summary });
+  } catch (error) {
+    console.error('LLM summarize failed', error);
+    const fallbackSummary = req.body.extractedSummary || (req.body.title ? `${req.body.title}` : 'No summary available');
+    const date = req.body.date ? `${new Date(req.body.date).toISOString().split('T')[0]} — ` : '';
+    const region = req.body.region ? `${req.body.region}: ` : '';
+    res.json({ ok: true, summary: `${date}${region}${fallbackSummary}` });
+  }
+});
+
 app.get('/workspaces', async (req, res) => {
   const requestedStatus = typeof req.query.status === 'string' ? req.query.status.toLowerCase() : null;
   const workspaces = await readWorkspaces(requestedStatus);
@@ -151,17 +186,28 @@ app.post('/workspaces', async (req, res) => {
   }
 });
 
-app.listen(PORT, async () => {
+// Start optional scheduler
+function startSchedulerIfMain() {
+  try {
+    const { startScheduler } = require('./scheduler');
+    startScheduler();
+  } catch (err) {
+    console.warn('Scheduler module failed to start', err && err.message ? err.message : err);
+  }
+}
+
+async function startServer() {
   const { getMongoStatus } = require('./src/ingest/store');
   const mongoState = await getMongoStatus();
-  console.log(`Scraper server listening on http://localhost:${PORT}`);
-  console.log(`MongoDB status: ${mongoState.message}`);
-});
-
-// Start optional scheduler
-try {
-  const { startScheduler } = require('./scheduler');
-  startScheduler();
-} catch (err) {
-  console.warn('Scheduler module failed to start', err && err.message ? err.message : err);
+  app.listen(PORT, async () => {
+    console.log(`Scraper server listening on http://localhost:${PORT}`);
+    console.log(`MongoDB status: ${mongoState.message}`);
+  });
+  startSchedulerIfMain();
 }
+
+if (require.main === module) {
+  startServer();
+}
+
+module.exports = { app, startServer };
